@@ -230,8 +230,10 @@ void do_terrain(char *line) {
 	double new_min_height = min_height * scalar;
 	double new_max_height = max_height * scalar;
 
-	fseeko(terrain, 0, SEEK_SET);
-	fprintf(terrain, "%d %f %f %f\n", terrain_scale_num, scalar_input, new_min_height, new_max_height);
+	// open temp file, write to it, and close
+	f_temp = fopen("replace.tmp", "w");
+	fprintf(f_temp, "%d %f %f %f\n", terrain_scale_num, scalar_input, new_min_height, new_max_height);
+	close_temp("terrain.hf", f_temp, "replace.tmp");
 
 }
 
