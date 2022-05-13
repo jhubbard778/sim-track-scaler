@@ -15,16 +15,16 @@ FILE *statues;
 FILE *decals;
 FILE *terrain;
 FILE *tg;
+FILE *flaggers;
 FILE *f_temp;
 double scalar_input;
-double new_scale;
+double scalar;
 
 /*
 #################
 Terrain Variables
 #################
 */
-int terrain_size;
 double terrain_scale;
 double min_height;
 double max_height;
@@ -41,6 +41,7 @@ void do_statue(char *);
 void do_decal(char *);
 void do_tg_pt_1(char *);
 void do_tg_pt_2(char *);
+void do_flagger(char *);
 
 void close_temp(char *, FILE *, char *);
 void reset(char *, size_t, FILE *);
@@ -62,19 +63,20 @@ int main(int argc, char **argv) {
 		printf("\x1b[31mError: Enter a scalar between 0 and 4\n\x1b[0m");
 		return -1;
 	}
-	if (access("terrain.hf", F_OK) == 0) terrain = fopen("terrain.hf", "r+");
+	if (access("terrain.hf", F_OK) == 0) terrain = fopen("terrain.hf", "r");
 
 	if (!terrain) {
 		printf("\x1b[31mError: Need terrain.hf file for original track scale info\n\x1b[0m");
 		return -1;
 	}
 
-	if (access("billboards", F_OK) == 0) billboards = fopen("billboards", "r+");
-	if (access("statues", F_OK) == 0) statues = fopen("statues", "r+");
-	if (access("decals", F_OK) == 0) decals = fopen("decals", "r+");
-	if (access("timing_gates", F_OK) == 0) tg = fopen("timing_gates", "r+");
+	if (access("billboards", F_OK) == 0) billboards = fopen("billboards", "r");
+	if (access("statues", F_OK) == 0) statues = fopen("statues", "r");
+	if (access("decals", F_OK) == 0) decals = fopen("decals", "r");
+	if (access("timing_gates", F_OK) == 0) tg = fopen("timing_gates", "r");
+	if (access("flaggers", F_OK) == 0) flaggers = fopen("flaggers", "r");
 
-	if (!billboards && !statues && !decals && !tg) {
+	if (!billboards && !statues && !decals && !tg && !flaggers) {
 		printf("\x1b[31mError: No files to scale\n\x1b[0m");
 		return -1;
 	}
@@ -90,13 +92,17 @@ int main(int argc, char **argv) {
 	reset(lineptr, s, terrain);
 	printf("\x1b[32mSucessfully resized terrain.hf!\n");
 	
+	// ######### BILLBOARDS ##########
 	if (billboards) {
 		// open temp file
 		f_temp = fopen("replace.tmp", "w");
 
 		// go through original file, rewrite to temp file, if we hit a new line just go to the next line
 		while (getline(&lineptr, &s, billboards) != -1) {
-			if (strcmp("\n", lineptr) == 0) continue;
+			if (lineptr[0] != '[') {
+				fprintf(billboards, "%s", lineptr);
+				continue;
+			}
 			do_billboard(lineptr);
 		}
 
@@ -108,26 +114,38 @@ int main(int argc, char **argv) {
 		// print to user success
 		printf("\x1b[32mSucessfully resized billboards!\n\x1b[0m");
 	}
+
+	// ######### STATUES ##########
 	if (statues) {
 		f_temp = fopen("replace.tmp", "w");
 		while (getline(&lineptr, &s, statues) != -1) {
-			if (strcmp("\n", lineptr) == 0) continue;
+			if (lineptr[0] != '[') {
+				fprintf(statues, "%s", lineptr);
+				continue;
+			}
 			do_statue(lineptr);
 		}
 		close_temp("statues", f_temp, "replace.tmp");	
 		reset(lineptr, s, statues);
 		printf("\x1b[32mSucessfully resized statues!\n\x1b[0m");
 	}
+
+	// ######### DECALS ##########
 	if (decals) {
 		f_temp = fopen("replace.tmp", "w");
 		while (getline(&lineptr, &s, decals) != -1) {
-			if (strcmp("\n", lineptr) == 0) continue;
+			if (lineptr[0] != '[') {
+				fprintf(decals, "%s", lineptr);
+				continue;
+			}
 			do_decal(lineptr);
 		}
 		close_temp("decals", f_temp, "replace.tmp");
 		reset(lineptr, s, decals);
 		printf("\x1b[32mSucessfully resized decals!\n\x1b[0m");
 	}
+
+	// ######### TIMING GATES ##########
 	if (tg) {
 		f_temp = fopen("replace.tmp", "w");
 		while (getline(&lineptr, &s, tg) != -1) {
@@ -144,7 +162,7 @@ int main(int argc, char **argv) {
 			}
 
 			// Final steps if we reached the lap order
-			if (strcmp("firstlap:\n", lineptr)) timing_gate_num = 2;
+			if (strcmp("firstlap:\n", lineptr) == 0) timing_gate_num = 2;
 
 			if (timing_gate_num == 0) {
 				do_tg_pt_1(lineptr);
@@ -160,7 +178,24 @@ int main(int argc, char **argv) {
 		printf("\x1b[32mSucessfully resized timing gates!\n\x1b[0m");
 	}
 
-	//       5. Clean up the rest
+	// ######### FLAGGERS ##########
+	if (flaggers) {
+		f_temp = fopen("replace.tmp", "w");
+
+		while (getline(&lineptr, &s, flaggers) != -1) {
+			if (lineptr[0] != '[') {
+				fprintf(f_temp, "%s", lineptr);
+				continue;
+			}
+			do_flagger(lineptr);
+		}
+
+		close_temp("flaggers", f_temp, "replace.tmp");
+		reset(lineptr, s, flaggers);
+		printf("\x1b[32mSucessfully resized flaggers!\n\x1b[0m");
+	}
+
+	// Free the line pointer
 	free(lineptr);
 
 	return 0;
@@ -179,7 +214,6 @@ void do_terrain(char *line) {
 
 	char *token = strsep(&stringp, " ");
 	int terrain_scale_num = atoi(token);
-	terrain_size = (int) (pow((double)2, (double)terrain_scale_num + 1) + 1);
 
 	token = strsep(&stringp, " ");
 	terrain_scale = strtod(token, NULL);
@@ -192,9 +226,9 @@ void do_terrain(char *line) {
 
 	// Reset the line ptr to the beginning and rewrite the information out
 	stringp = line;
-	new_scale = scalar_input / terrain_scale;
-	double new_min_height = min_height * new_scale;
-	double new_max_height = max_height * new_scale;
+	scalar = scalar_input / terrain_scale;
+	double new_min_height = min_height * scalar;
+	double new_max_height = max_height * scalar;
 
 	fseeko(terrain, 0, SEEK_SET);
 	fprintf(terrain, "%d %f %f %f\n", terrain_scale_num, scalar_input, new_min_height, new_max_height);
@@ -210,26 +244,19 @@ void do_billboard(char *line) {
 
 	stringp += offset;
 
-	double size;
-	double aspect;
-	char *png;
-	
 	char *token = strsep(&stringp, " ");
-	size = strtod(token, NULL);
-	token = strsep(&stringp, " ");
-	aspect = strtod(token, NULL);
-	token = strsep(&stringp, " ");
-	png = token;
+	double size = strtod(token, NULL);
 
-	double new_x = coords[0] * new_scale;
-	double new_y = coords[1] * new_scale;
-	double new_z = coords[2] * new_scale;
-	double new_size = size * new_scale;
+	// get the aspect and png, which are unchanging so we can store as a string
+	char *aspect_and_png = strsep(&stringp, "\n");
 
-	// No need to change aspect ratio or png
+	double new_x = coords[0] * scalar;
+	double new_y = coords[1] * scalar;
+	double new_z = coords[2] * scalar;
+	double new_size = size * scalar;
 
 	// Write to temporary file
-	fprintf(f_temp, "[%f %f %f] %f %f %s", new_x, new_y, new_z, new_size, aspect, png);
+	fprintf(f_temp, "[%f %f %f] %f %s\n", new_x, new_y, new_z, new_size, aspect_and_png);
 
 }
 
@@ -239,25 +266,92 @@ void do_statue(char *line) {
 	stringp += offset;
 
 	// the only thing we need to change in the statues is the coords, so we can put the rest of the info in one string path
-	char *token = strsep(&stringp, "\n");
-	char *path = token;
-	path[strlen(path)] = '\n';
+	char *path = strsep(&stringp, "\n");
 
-	double new_x = coords[0] * new_scale;
-	double new_y = coords[1] * new_scale;
-	double new_z = coords[2] * new_scale;
-	fprintf(f_temp, "[%f %f %f] %s", new_x, new_y, new_z, path);
+	double new_x = coords[0] * scalar;
+	double new_y = coords[1] * scalar;
+	double new_z = coords[2] * scalar;
+
+	// Write to temporary file
+	fprintf(f_temp, "[%f %f %f] %s\n", new_x, new_y, new_z, path);
 }
 
 void do_decal(char *line) {
 	char *stringp = line;
 	int offset = get_coords(stringp, 2);
 	stringp += offset;
+
+	// unchanging angle
+	char *angle = strsep(&stringp, " ");
+
+	// parse size to double
+	char *token = strsep(&stringp, " ");
+	double size = strtod(token, NULL);
+
+	// unchanging aspect and png
+	char *aspect_and_png = strsep(&stringp, "\n");
+
+	double new_x = coords[0] * scalar;
+	double new_z = coords[1] * scalar;
+	double new_size = size * scalar;
+
+	// Write to temp file
+	fprintf(f_temp, "[%f %f] %s %f %s\n", new_x, new_z, angle, new_size, aspect_and_png);
 }
 
 void do_tg_pt_1(char *line) {
+
+	char *stringp = line;
+	int offset = get_coords(stringp, 3);
+
+	double new_x = coords[0] * scalar;
+	double new_y = coords[1] * scalar;
+	double new_z = coords[2] * scalar;
+
+	stringp += offset;
+
+	// set the rest of the path equal to the angle and directory stuff
+	char *path = strsep(&stringp, "\n");
+
+	// write to temp file
+	fprintf(f_temp, "[%f %f %f] %s\n", new_x, new_y, new_z, path);
+
 }
+
 void do_tg_pt_2(char *line) {
+	char *stringp = line;
+
+	// Get size of gate
+	char *token = strsep(&stringp, " ");
+	double size = strtod(token, NULL);
+	double new_size = size * scalar;
+
+	// Get first set of coords
+	int offset = get_coords(stringp, 3);
+	double new_x1 = coords[0] * scalar;
+	double new_y1 = coords[1] * scalar;
+	double new_z1 = coords[2] * scalar;
+	stringp += offset;
+
+	// Get second set of coords
+	offset = get_coords(stringp, 3);
+	double new_x2 = coords[0] * scalar;
+	double new_y2 = coords[1] * scalar;
+	double new_z2 = coords[2] * scalar;
+
+	// write to temp file
+	fprintf(f_temp, "%f [%f %f %f] [%f %f %f]\n", new_size, new_x1, new_y1, new_z1, new_x2, new_y2, new_z2);
+}
+
+void do_flagger(char *line) {
+	char *stringp = line;
+	get_coords(stringp, 3);
+	double new_x = coords[0] * scalar;
+	double new_y = coords[1] * scalar;
+	double new_z = coords[2] * scalar;
+
+	// write to temp file
+	fprintf(f_temp, "[%f %f %f]\n", new_x, new_y, new_z);
 }
 
 int get_coords(char *ptr, int num_of_coords) {
