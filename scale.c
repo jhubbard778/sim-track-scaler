@@ -14,6 +14,7 @@
 ########################
 */
 
+// This array is the supported filetypes to scale
 char* filenames[NUM_FILES] = {"terrain.hf", "billboards", "statues", "decals", "timing_gates", "flaggers", "edinfo"};
 FILE *f_temp;
 
@@ -54,13 +55,12 @@ char *original_folder_directory;
 // Scale Functions
 int do_terrain_work(char *);
 void scale_terrain(char *, char *);
-void do_billboard(char *);
-void do_statue(char *);
 void scale_statues_and_billboards(char *, char *);
 void scale_decal(char *);
 void scale_tg_pt_1(char *);
 void scale_tg_pt_2(char *);
 void scale_flaggers(char *);
+void scale_edinfo(char *);
 int get_coords(char *, int);
 
 // Folder Functions
@@ -125,150 +125,86 @@ int main(int argc, char **argv) {
 
 		// open the temporary file
 		f_temp = fopen("replace.tmp", "w");
+
+		if (strcmp(filenames[i], "edinfo") == 0) {
+			// do edinfo work
+			while (getline(&lineptr, &s, current_file) != -1) {
+				scale_edinfo(lineptr);
+			}
+		}
 		
-		if (strcmp(filenames[i], "billboards") == 0 || strcmp(filenames[i], "statues") == 0) {
-			printf("Doing %s work\n", filenames[i]);
+		if (strcmp(filenames[i], "timing_gates") != 0) {
 			while (getline(&lineptr, &s, current_file) != -1) {
 				if (lineptr[0] != '[') {
+					fprintf(f_temp, "%s", lineptr);
 					continue;
 				}
-				scale_statues_and_billboards(lineptr, filenames[i]);
+				if (strcmp(filenames[i], "billboards") == 0 || strcmp(filenames[i], "statues") == 0) {
+					scale_statues_and_billboards(lineptr, filenames[i]);
+					continue;
+				}
+
+				if (strcmp(filenames[i], "decals") == 0) {
+					scale_decal(lineptr);
+					continue;
+				}
+
+				if (strcmp(filenames[i], "flaggers") == 0) {
+					scale_flaggers(lineptr);
+				}
+			}
+		} else if (strcmp(filenames[i], "timing_gates") == 0) {
+			// do timing gates work
+			unsigned int current_timing_gate_part = 1;
+			while (getline(&lineptr, &s, current_file) != -1) {
+				// print the starting gate and checkpoint headers
+				if (strcmp("startinggate:\n", lineptr) == 0) {
+					fprintf(f_temp, "startinggate:\n");
+					continue;
+				}
+
+				if (strcmp("checkpoints:\n", lineptr) == 0) {
+					current_timing_gate_part++; // current_timing_gate_part = 2
+					fprintf(f_temp, "checkpoints:\n");
+					continue;
+				}
+
+				// If we reach the timing gate order we're done with scaling so just print the rest of the file
+				if (strcmp("firstlap:\n", lineptr) == 0) {
+					current_timing_gate_part++; // current_timing_gate_part = 3
+				}
+
+				switch (current_timing_gate_part) {
+					case 1:
+						scale_tg_pt_1(lineptr);
+						break;
+					case 2:
+						scale_tg_pt_2(lineptr);
+						break;
+					default:
+						fprintf(f_temp, "%s", lineptr);
+						break;
+				}
 			}
 		}
 
 		move_files(current_filepath, f_temp, "replace.tmp");
 		reset(lineptr, s, current_file);
-		printf("\x1b[32mSucessfully resized %s!\n\x1b[0m", filenames[i]);
+		printf("\x1b[32mSucessfully resized %s!\x1b[0m\n", filenames[i]);
 	}
 
+	// Free memory in use
+	free(lineptr);
 	free(current_filepath);
 	free(folder_path);
-
-	/*
-	
-	// ######### BILLBOARDS ##########
-	if (billboards) {
-		// open temp file
-		f_temp = fopen("replace.tmp", "w");
-
-		// go through original file, rewrite to temp file, if we hit a new line just go to the next line
-		while (getline(&lineptr, &s, billboards) != -1) {
-			if (lineptr[0] != '[') {
-				fprintf(billboards, "%s", lineptr);
-				continue;
-			}
-			do_billboard(lineptr);
-		}
-
-		// close the temp file, renaming it to the original file name
-		move_files(folder_path + "/billboards", f_temp, "replace.tmp");
-		// reset line pointer, s, and close billboards file stream
-		reset(lineptr, s, billboards);
-
-		// print to user success
-	}
-
-	// ######### STATUES ##########
-	if (statues) {
-		f_temp = fopen("replace.tmp", "w");
-		while (getline(&lineptr, &s, statues) != -1) {
-			if (lineptr[0] != '[') {
-				fprintf(statues, "%s", lineptr);
-				continue;
-			}
-			do_statue(lineptr);
-		}
-		move_files(folder_path + "/statues", f_temp, "replace.tmp");	
-		reset(lineptr, s, statues);
-		printf("\x1b[32mSucessfully resized statues!\n\x1b[0m");
-	}
-
-	// ######### DECALS ##########
-	if (decals) {
-		f_temp = fopen("replace.tmp", "w");
-		while (getline(&lineptr, &s, decals) != -1) {
-			if (lineptr[0] != '[') {
-				fprintf(decals, "%s", lineptr);
-				continue;
-			}
-			scale_decal(lineptr);
-		}
-		move_files("decals", f_temp, "replace.tmp");
-		reset(lineptr, s, decals);
-		printf("\x1b[32mSucessfully resized decals!\n\x1b[0m");
-	}
-
-	// this defines which timing gate part we will do work on
-	int current_timing_gate_part = 1;
-
-	// ######### TIMING GATES ##########
-	if (tg) {
-		f_temp = fopen("replace.tmp", "w");
-		while (getline(&lineptr, &s, tg) != -1) {
-
-			// print the starting gate and checkpoint headers
-			if (strcmp("startinggate:\n", lineptr) == 0) {
-				fprintf(f_temp, "startinggate:\n");
-				continue;
-			}
-
-			if (strcmp("checkpoints:\n", lineptr) == 0) {
-				current_timing_gate_part++;
-				fprintf(f_temp, "checkpoints:\n");
-				continue;
-			}
-
-			// If we reach the timing gate order we're done with scaling so just print the rest of the file
-			if (strcmp("firstlap:\n", lineptr) == 0) {
-				current_timing_gate_part++;
-			}
-
-			switch (current_timing_gate_part) {
-				case 1:
-					scale_tg_pt_1(lineptr);
-					break;
-				case 2:
-					scale_tg_pt_2(lineptr);
-					break;
-				default:
-					fprintf(f_temp, "%s", lineptr);
-					break;
-			}
-		}
-
-		move_files("timing_gates", f_temp, "replace.tmp");
-		reset(lineptr, s, tg);
-		printf("\x1b[32mSucessfully resized timing gates!\n\x1b[0m");
-	}
-
-	// ######### FLAGGERS ##########
-	if (flaggers) {
-		f_temp = fopen("replace.tmp", "w");
-
-		while (getline(&lineptr, &s, flaggers) != -1) {
-			if (lineptr[0] != '[') {
-				fprintf(f_temp, "%s", lineptr);
-				continue;
-			}
-			scale_flaggers(lineptr);
-		}
-
-		move_files("flaggers", f_temp, "replace.tmp");
-		reset(lineptr, s, flaggers);
-		printf("\x1b[32mSucessfully resized flaggers!\n\x1b[0m");
-	}
-	*/
-
-	// Free the line pointer and subfolder directories
-	free(lineptr);
 	if (original_folder_directory != NULL) free(original_folder_directory);
 	if (prev_folder_directory != NULL) free(prev_folder_directory);
+
 	return 0;
 }
 
 // Reset takes in a pointer, size, and file stream.
 // It points the pointer to null, resets the size, and closes the file stream.
-
 void reset(char *ptr, size_t size, FILE *file_stream) {
 	ptr = NULL;
 	size = 0;
@@ -315,7 +251,6 @@ void scale_terrain(char *line, char *terrain_filepath) {
 	char *token = strsep(&stringp, " ");
 	int terrain_resolution = atoi(token);
 
-
 	token = strsep(&stringp, " ");
 	terrain_scale = strtod(token, NULL);
 
@@ -328,12 +263,12 @@ void scale_terrain(char *line, char *terrain_filepath) {
 	// Reset the line ptr to the beginning and rewrite the information out
 	stringp = line;
 	multiplier = new_terrain_scale / terrain_scale;
-	double new_min_height = min_height * multiplier;
-	double new_max_height = max_height * multiplier;
+	min_height *= multiplier;
+	max_height *= multiplier;
 
 	// open temp file, write to it, and close
 	f_temp = fopen("replace.tmp", "w");
-	fprintf(f_temp, "%d %f %f %f\n", terrain_resolution, new_terrain_scale, new_min_height, new_max_height);
+	fprintf(f_temp, "%d %f %f %f\n", terrain_resolution, new_terrain_scale, min_height, max_height);
 	move_files(terrain_filepath, f_temp, "replace.tmp");
 
 }
@@ -347,6 +282,7 @@ void scale_statues_and_billboards(char *line, char *type) {
 	double new_y = coords[1] * multiplier;
 	double new_z = coords[2] * multiplier;
 
+	// get extra variables to scale if we're scaling billboards
 	if (strcmp(type, "billboards") == 0) {
 		char *sizetoken = strsep(&stringp, " ");
 		double size = strtod(sizetoken, NULL);
@@ -378,10 +314,10 @@ void scale_decal(char *line) {
 
 	double new_x = coords[0] * multiplier;
 	double new_z = coords[1] * multiplier;
-	double new_size = size * multiplier;
+	size *= multiplier;
 
 	// Write to temp file
-	fprintf(f_temp, "[%f %f] %s %f %s\n", new_x, new_z, angle, new_size, aspect_and_png);
+	fprintf(f_temp, "[%f %f] %s %f %s\n", new_x, new_z, angle, size, aspect_and_png);
 }
 
 void scale_tg_pt_1(char *line) {
@@ -409,7 +345,7 @@ void scale_tg_pt_2(char *line) {
 	// Get size of gate
 	char *token = strsep(&stringp, " ");
 	double size = strtod(token, NULL);
-	double new_size = size * multiplier;
+	size *= multiplier;
 
 	// Get first set of coords
 	int offset = get_coords(stringp, 3);
@@ -425,7 +361,7 @@ void scale_tg_pt_2(char *line) {
 	double new_z2 = coords[2] * multiplier;
 
 	// write to temp file
-	fprintf(f_temp, "%f [%f %f %f] [%f %f %f]\n", new_size, new_x1, new_y1, new_z1, new_x2, new_y2, new_z2);
+	fprintf(f_temp, "%f [%f %f %f] [%f %f %f]\n", size, new_x1, new_y1, new_z1, new_x2, new_y2, new_z2);
 }
 
 void scale_flaggers(char *line) {
@@ -437,6 +373,51 @@ void scale_flaggers(char *line) {
 
 	// write to temp file
 	fprintf(f_temp, "[%f %f %f]\n", new_x, new_y, new_z);
+}
+
+void scale_edinfo(char *line) {
+	char *stringp = line;
+	char *token = strsep(&stringp, " ");
+
+	if (strcmp(token, "add_gradient") == 0) {
+		// add_gradient <start_x> <start_z> <end_x> <end_z>
+		token = strsep(&stringp, " ");
+		double start_x = strtod(token, NULL);
+
+		token = strsep(&stringp, " ");
+		double start_z = strtod(token, NULL);
+
+		token = strsep(&stringp, " ");
+		double end_x = strtod(token, NULL);
+
+		token = strsep(&stringp, " ");
+		double end_z = strtod(token, NULL);
+
+		start_x *= multiplier;
+		start_z *= multiplier;
+		end_x *= multiplier;
+		end_z *= multiplier;
+
+		fprintf(f_temp, "add_gradient %f %f %f %f\n", start_x, start_z, end_x, end_z);
+		return;
+	}
+
+	if (strcmp(token, "add_point") == 0) {
+		// add_point <0 linear, 1 curved> <distance from origin> <height>
+		token = strsep(&stringp, " ");
+		int point_type = atoi(token);
+
+		token = strsep(&stringp, " ");
+		double distance = strtod(token, NULL);
+
+		token = strsep(&stringp, " ");
+		double height = strtod(token, NULL);
+
+		distance *= multiplier;
+		height *= multiplier;
+
+		fprintf(f_temp, "add_point %d %f %f\n", point_type, distance, height);
+	}
 }
 
 int get_coords(char *ptr, int num_of_coords) {
