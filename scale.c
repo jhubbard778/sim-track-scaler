@@ -15,7 +15,6 @@
 */
 
 char* filenames[NUM_FILES] = {"terrain.hf", "billboards", "statues", "decals", "timing_gates", "flaggers", "edinfo"};
-FILE *trackfiles[NUM_FILES];
 FILE *f_temp;
 
 /*
@@ -108,7 +107,7 @@ int main(int argc, char **argv) {
 	char *current_filepath = NULL;
 	size_t s = 0;
 
-	// Go through all the files
+	// 4. Scale the rest of the files
 	for (int i = 1; i < NUM_FILES; i++) {
 
 		// get the current filepath to the file
@@ -122,14 +121,14 @@ int main(int argc, char **argv) {
 			continue;
 		}
 
-		trackfiles[i] = fopen(current_filepath, "r");
+		FILE *current_file = fopen(current_filepath, "r");
 
 		// open the temporary file
 		f_temp = fopen("replace.tmp", "w");
 		
 		if (strcmp(filenames[i], "billboards") == 0 || strcmp(filenames[i], "statues") == 0) {
 			printf("Doing %s work\n", filenames[i]);
-			while (getline(&lineptr, &s, trackfiles[i]) != -1) {
+			while (getline(&lineptr, &s, current_file) != -1) {
 				if (lineptr[0] != '[') {
 					continue;
 				}
@@ -138,7 +137,7 @@ int main(int argc, char **argv) {
 		}
 
 		move_files(current_filepath, f_temp, "replace.tmp");
-		reset(lineptr, s, trackfiles[i]);
+		reset(lineptr, s, current_file);
 		printf("\x1b[32mSucessfully resized %s!\n\x1b[0m", filenames[i]);
 	}
 
@@ -285,22 +284,23 @@ int do_terrain_work(char* folder_path) {
 	strcat(terrain_filepath, "/");
 	strcat(terrain_filepath, filenames[0]);
 
+	FILE *terrain;
 	if (access(terrain_filepath, F_OK) == 0) {
-		trackfiles[0] = fopen(terrain_filepath, "r");
+		terrain = fopen(terrain_filepath, "r");
 	}
 
-	if (trackfiles[0] == NULL) {
+	if (terrain == NULL) {
 		printf("\x1b[31mError: No terrain.hf file for original track scale info\x1b[0m\n");
 		return -1;
 	}
 
 	// get the line, pass it into the scale_terrain function
-	getline(&lineptr, &s, trackfiles[0]);
+	getline(&lineptr, &s, terrain);
 	scale_terrain(lineptr, terrain_filepath);
 	free(terrain_filepath);
 
 	// reset the line pointer, size, and close the file
-	reset(lineptr, s, trackfiles[0]);
+	reset(lineptr, s, terrain);
 
 	// free the line pointer
 	free(lineptr);
