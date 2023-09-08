@@ -524,11 +524,12 @@ void move_files(char *folder_path, char *filename, FILE *temp, char *temp_file_n
 }
 
 char* subfolder_exists(char *folder_path, char *subfolder) {
-	char *subfolder_directory = malloc(strlen(folder_path) + strlen(subfolder) + 2);
+	char *subfolder_directory = malloc(strlen(folder_path) + strlen(subfolder) + 3);
 	
 	strcpy(subfolder_directory, folder_path);
 	strcat(subfolder_directory, "/");
 	strcat(subfolder_directory, subfolder);
+	strcat(subfolder_directory, "/");
 
 	struct stat sb;
 	if (!(stat(subfolder_directory, &sb) == 0 && S_ISDIR(sb.st_mode))) {
