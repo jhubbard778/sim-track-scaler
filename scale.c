@@ -43,9 +43,9 @@ double coords[3];
 	SubFolder Variables
 #########################
 */
-
 char *prev_folder_directory;
 char *original_folder_directory;
+unsigned short original_folder_directory_created = 0;
 
 /*
 ################################
@@ -53,8 +53,7 @@ char *original_folder_directory;
 ################################
 */
 // Scale Functions
-int do_terrain_work(char *);
-void scale_terrain(char *, char *);
+void scale_terrain(char *, char *, char *);
 void scale_statues_and_billboards(char *, char *);
 void scale_decal(char *);
 void scale_tg_pt_1(char *);
@@ -62,14 +61,16 @@ void scale_tg_pt_2(char *);
 void scale_flaggers(char *);
 void scale_edinfo(char *);
 int get_coords(char *, int);
+int do_terrain_work(char *);
 
 // Folder Functions
 char* validate_folder_path(char *);
 char* subfolder_exists(char *, char *);
 
 // File Functions
-void move_files(char *, FILE *, char *);
+void move_files(char *, char *, FILE *, char *);
 void reset(char *, size_t, FILE *);
+char* basename(char* path);
 
 int main(int argc, char **argv) {
 
@@ -98,6 +99,7 @@ int main(int argc, char **argv) {
 	// 3. Read in terrain and scale
 	int ret = do_terrain_work(folder_path);
 	if (ret == -1) {
+		free(folder_path);
 		if (original_folder_directory != NULL) free(original_folder_directory);
 		if (prev_folder_directory != NULL) free(prev_folder_directory);
 		return -1;
@@ -125,16 +127,14 @@ int main(int argc, char **argv) {
 
 		// open the temporary file
 		f_temp = fopen("replace.tmp", "w");
-
-		if (strcmp(filenames[i], "edinfo") == 0) {
-			// do edinfo work
-			while (getline(&lineptr, &s, current_file) != -1) {
-				scale_edinfo(lineptr);
-			}
-		}
 		
 		if (strcmp(filenames[i], "timing_gates") != 0) {
 			while (getline(&lineptr, &s, current_file) != -1) {
+				if (strcmp(filenames[i], "edinfo") == 0) {
+					scale_edinfo(lineptr);
+					continue;
+				}
+
 				if (lineptr[0] != '[') {
 					fprintf(f_temp, "%s", lineptr);
 					continue;
@@ -151,11 +151,11 @@ int main(int argc, char **argv) {
 
 				if (strcmp(filenames[i], "flaggers") == 0) {
 					scale_flaggers(lineptr);
-				}
+				}				
 			}
-		} else if (strcmp(filenames[i], "timing_gates") == 0) {
+		} else {
 			// do timing gates work
-			unsigned int current_timing_gate_part = 1;
+			unsigned short current_timing_gate_part = 1;
 			while (getline(&lineptr, &s, current_file) != -1) {
 				// print the starting gate and checkpoint headers
 				if (strcmp("startinggate:\n", lineptr) == 0) {
@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		move_files(current_filepath, f_temp, "replace.tmp");
+		move_files(folder_path, current_filepath, f_temp, "replace.tmp");
 		reset(lineptr, s, current_file);
 		printf("\x1b[32mSucessfully resized %s!\x1b[0m\n", filenames[i]);
 	}
@@ -197,8 +197,8 @@ int main(int argc, char **argv) {
 	free(lineptr);
 	free(current_filepath);
 	free(folder_path);
-	if (original_folder_directory != NULL) free(original_folder_directory);
-	if (prev_folder_directory != NULL) free(prev_folder_directory);
+	free(original_folder_directory);
+	free(prev_folder_directory);
 
 	return 0;
 }
@@ -221,18 +221,17 @@ int do_terrain_work(char* folder_path) {
 	strcat(terrain_filepath, filenames[0]);
 
 	FILE *terrain;
-	if (access(terrain_filepath, F_OK) == 0) {
-		terrain = fopen(terrain_filepath, "r");
-	}
-
-	if (terrain == NULL) {
+	if (access(terrain_filepath, F_OK) != 0) {
 		printf("\x1b[31mError: No terrain.hf file for original track scale info\x1b[0m\n");
+		free(terrain_filepath);
 		return -1;
 	}
 
+	terrain = fopen(terrain_filepath, "r");
+
 	// get the line, pass it into the scale_terrain function
 	getline(&lineptr, &s, terrain);
-	scale_terrain(lineptr, terrain_filepath);
+	scale_terrain(lineptr, terrain_filepath, folder_path);
 	free(terrain_filepath);
 
 	// reset the line pointer, size, and close the file
@@ -244,7 +243,7 @@ int do_terrain_work(char* folder_path) {
 	return 0;
 }
 
-void scale_terrain(char *line, char *terrain_filepath) {
+void scale_terrain(char *line, char *terrain_filepath, char *folder_path) {
 
 	char *stringp = line;
 
@@ -269,8 +268,7 @@ void scale_terrain(char *line, char *terrain_filepath) {
 	// open temp file, write to it, and close
 	f_temp = fopen("replace.tmp", "w");
 	fprintf(f_temp, "%d %f %f %f\n", terrain_resolution, new_terrain_scale, min_height, max_height);
-	move_files(terrain_filepath, f_temp, "replace.tmp");
-
+	move_files(folder_path, terrain_filepath, f_temp, "replace.tmp");
 }
 
 void scale_statues_and_billboards(char *line, char *type) {
@@ -477,10 +475,52 @@ char* validate_folder_path(char* folder_path_input) {
 
 
 // Move files will check where to put the original file, move it, and close then rename the temp file to the original filename
-void move_files(char *filename, FILE *temp, char *temp_file_name) {
+void move_files(char *folder_path, char *filename, FILE *temp, char *temp_file_name) {
+	
+	// close the temp file
 	fclose(temp);
-	remove(filename);
+
+	char *base_filename = basename(filename);
+	char *file_location = NULL;
+
+	if (original_folder_directory == NULL) {
+		// allocate memory for the original files directory
+		original_folder_directory = malloc(strlen(folder_path) + strlen("/original files/") + 1);
+		strcpy(original_folder_directory, folder_path);
+		strcat(original_folder_directory, "/original files/");
+
+		// create the directory, and let
+		mkdir(original_folder_directory, 0700);
+		original_folder_directory_created = 1;
+	}
+
+	// if the previous folder directory is empty and we never generated a original folder directory it means that the folder already exists
+	if (prev_folder_directory == NULL && original_folder_directory_created == 0) {
+		// allocate memory for the previous files directory
+		prev_folder_directory = malloc(strlen(folder_path) + strlen("/previous files/") + 1);
+		strcpy(prev_folder_directory, folder_path);
+		strcat(prev_folder_directory, "/previous files/");
+
+		// create the directory
+		mkdir(prev_folder_directory, 0700);
+	}
+
+	// if we didn't create an original folder, go to previous files location
+	if (original_folder_directory_created == 0) {
+		file_location = malloc(strlen(prev_folder_directory) + strlen(base_filename) + 1);
+		strcpy(file_location, prev_folder_directory);
+		strcat(file_location, base_filename);
+	} else { // otherwise go to original files location
+		file_location = malloc(strlen(original_folder_directory) + strlen(base_filename) + 1);
+		strcpy(file_location, original_folder_directory);
+		strcat(file_location, base_filename);
+	}
+
+	rename(filename, file_location);
 	rename(temp_file_name, filename);
+
+	free(file_location);
+	free(base_filename);
 }
 
 char* subfolder_exists(char *folder_path, char *subfolder) {
@@ -497,4 +537,12 @@ char* subfolder_exists(char *folder_path, char *subfolder) {
     }
 
 	return subfolder_directory;
+}
+
+char* basename(char *path) {
+	char *s = strrchr(path, '/');
+	if (s == NULL) {
+		return strdup(path);
+	}
+	return strdup(s + 1);
 }
